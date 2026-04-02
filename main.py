@@ -1,15 +1,27 @@
 from decimal import Decimal
-from domain_model import Admin, User, SimpleModel, Task
+from domain_model import Admin, User, UserBalance, SimpleModel, Task
 
 
-# тут базовый вараинт
+# тут базовый вариант
 def main() -> None:
     # создаем админа и обычного пользователя
-    admin = Admin(1, "admin@mail.com", "123")
-    user = User(2, "user@mail.com", "456")
+    admin = Admin(
+        1,
+        "admin@mail.com",
+        Admin.make_password_hash("123")
+    )
+
+    user = User(
+        2,
+        "user@mail.com",
+        User.make_password_hash("456")
+    )
+
+    # создаем отдельную сущность баланса пользователя
+    user_balance = UserBalance(user_id=user.id)
 
     # админ пополняет баланс пользователю
-    admin.add_money_user(user, Decimal("100"))
+    admin.add_money_user(user_balance, Decimal("100"))
 
     # создаем простую модель
     model = SimpleModel(
@@ -32,6 +44,7 @@ def main() -> None:
     task = Task(
         task_id=1,
         user=user,
+        balance=user_balance,
         model=model,
         data=data
     )
@@ -39,9 +52,9 @@ def main() -> None:
     # запускаем задачу
     result = task.run()
 
-    # в консоль 
+    # в консоль
     print("Статус задачи:", task.get_status().value)
-    print("Баланс пользователя:", user.get_balance())
+    print("Баланс пользователя:", user_balance.get_amount())
     print()
 
     print("Ответы модели:")

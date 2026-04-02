@@ -1,3 +1,4 @@
+import hashlib
 from decimal import Decimal
 from datetime import datetime
 from enum import Enum
@@ -35,7 +36,7 @@ class DataError:
         self.field_name = field_name
         self.text = text
 
-    # чтобы удобно печатать ошибку
+    # печать ошибки
     def __str__(self) -> str:
         return f"строка {self.row_num}, поле '{self.field_name}': {self.text}"
 
@@ -46,68 +47,62 @@ class MoneyMove:
     def __init__(
         self,
         move_id: int,
-        user: "User",
+        user_id: int,
         amount: Decimal,
         task_id: int | None = None
     ) -> None:
         self.id = move_id
-        self._user = user
+        self._user_id = user_id
         self._amount = amount
         self._task_id = task_id
         self._created_at = datetime.now()
+
+    # вернуть id пользователя
+    def get_user_id(self) -> int:
+        return self._user_id
 
     # вернуть сумму операции
     def get_amount(self) -> Decimal:
         return self._amount
 
     # этот метод должны переопределить наследники
-    def do(self) -> None:
+    def do(self, balance: "UserBalance") -> None:
         raise NotImplementedError("Метод do() не переопределен")
 
 
 # операция пополнения
 class PlusMoney(MoneyMove):
     # прибавляет к балансу
-    def do(self) -> None:
-        self._user._plus_balance(self._amount)
+    def do(self, balance: "UserBalance") -> None:
+        balance._plus(self._amount)
 
 
 # операция списания
 class MinusMoney(MoneyMove):
     # убавляет от баланса
-    def do(self) -> None:
-        self._user._minus_balance(self._amount)
+    def do(self, balance: "UserBalance") -> None:
+        balance._minus(self._amount)
 
 
-# обычный пользователь
-class User:
-    # создаем пользователя
+# отдельная сущность баланса пользователя
+class UserBalance:
+    # баланс связан с пользователем по user_id # поправил
     def __init__(
         self,
         user_id: int,
-        email: str,
-        password: str,
-        role: UserRole = UserRole.USER,
-        balance: Decimal = Decimal("0")
+        amount: Decimal = Decimal("0")
     ) -> None:
-        self.id = user_id
-        self._email = email
-        self._password = password
-        self._role = role
-        self._balance = balance
+        self._user_id = user_id
+        self._amount = amount
         self._moves: list[MoneyMove] = []
 
-    # вернуть почту
-    def get_email(self) -> str:
-        return self._email
+    # вернуть id пользователя
+    def get_user_id(self) -> int:
+        return self._user_id
 
-    # вернуть роль
-    def get_role(self) -> UserRole:
-        return self._role
-
-    # вернуть баланс
-    def get_balance(self) -> Decimal:
-        return self._balance
+    # вернуть текущий баланс
+    def get_amount(self) -> Decimal:
+        return self._amount
 
     # вернуть историю операций
     def get_moves(self) -> list[MoneyMove]:
@@ -115,16 +110,16 @@ class User:
 
     # хватает ли денег
     def has_money(self, amount: Decimal) -> bool:
-        return self._balance >= amount
+        return self._amount >= amount
 
     # пополнить баланс
     def add_money(self, amount: Decimal) -> PlusMoney:
         move = PlusMoney(
             move_id=len(self._moves) + 1,
-            user=self,
+            user_id=self._user_id,
             amount=amount
         )
-        move.do()
+        move.do(self)
         self._moves.append(move)
         return move
 
@@ -135,21 +130,54 @@ class User:
 
         move = MinusMoney(
             move_id=len(self._moves) + 1,
-            user=self,
+            user_id=self._user_id,
             amount=amount,
             task_id=task_id
         )
-        move.do()
+        move.do(self)
         self._moves.append(move)
         return move
 
     # внутренняя функция пополнения
-    def _plus_balance(self, amount: Decimal) -> None:
-        self._balance += amount
+    def _plus(self, amount: Decimal) -> None:
+        self._amount += amount
 
     # внутренняя функция списания
-    def _minus_balance(self, amount: Decimal) -> None:
-        self._balance -= amount
+    def _minus(self, amount: Decimal) -> None:
+        self._amount -= amount
+
+
+# обычный пользователь
+class User:
+    # создаем пользователя
+    def __init__(
+        self,
+        user_id: int,
+        email: str,
+        password_hash: str,
+        role: UserRole = UserRole.USER
+    ) -> None:
+        self.id = user_id
+        self._email = email
+        self._password_hash = password_hash
+        self._role = role
+
+    # сделать хэш пароля
+    @staticmethod
+    def make_password_hash(password: str) -> str:
+        return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+    # вернуть почту
+    def get_email(self) -> str:
+        return self._email
+
+    # вернуть роль
+    def get_role(self) -> UserRole:
+        return self._role
+
+    # проверить пароль
+    def check_password(self, password: str) -> bool:
+        return self._password_hash == self.make_password_hash(password)
 
 
 # админ
@@ -159,18 +187,17 @@ class Admin(User):
         self,
         user_id: int,
         email: str,
-        password: str,
-        balance: Decimal = Decimal("0")
+        password_hash: str
     ) -> None:
-        super().__init__(user_id, email, password, UserRole.ADMIN, balance)
+        super().__init__(user_id, email, password_hash, UserRole.ADMIN)
 
-    # админ может пополнить другого пользователя
-    def add_money_user(self, user: User, amount: Decimal) -> PlusMoney:
-        return user.add_money(amount)
+    # админ может пополнить баланс пользователя
+    def add_money_user(self, balance: UserBalance, amount: Decimal) -> PlusMoney:
+        return balance.add_money(amount)
 
     # админ может посмотреть операции пользователя
-    def show_user_moves(self, user: User) -> list[MoneyMove]:
-        return user.get_moves()
+    def show_user_moves(self, balance: UserBalance) -> list[MoneyMove]:
+        return balance.get_moves()
 
 
 # базовая модель
@@ -249,7 +276,7 @@ class TaskResult:
 
     # вернуть ответы модели
     def get_answers(self) -> list[dict]:
-        return self._answers
+        return self._answers.copy()
 
     # короткая инфа по результату
     def get_info(self) -> str:
@@ -268,11 +295,16 @@ class Task:
         self,
         task_id: int,
         user: User,
+        balance: UserBalance,
         model: Model,
         data: list[dict]
     ) -> None:
+        if balance.get_user_id() != user.id:
+            raise ValueError("Баланс не принадлежит пользователю")
+
         self.id = task_id
         self._user = user
+        self._balance = balance
         self._model = model
         self._data = data
         self._status = TaskStatus.NEW
@@ -319,7 +351,7 @@ class Task:
 
         price = self._model.get_price()
 
-        if not self._user.has_money(price):
+        if not self._balance.has_money(price):
             self._status = TaskStatus.ERROR
             raise NotEnoughMoneyError("Недостаточно денег для запуска задачи")
 
@@ -329,7 +361,7 @@ class Task:
             good_rows, errors = self.check_data()
             answers = self._model.predict(good_rows)
 
-            self._user.take_money(price, task_id=self.id)
+            self._balance.take_money(price, task_id=self.id)
 
             result = TaskResult(
                 result_id=self.id,
