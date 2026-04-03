@@ -4,8 +4,8 @@ from decimal import Decimal
 
 import pytest
 
-# domain_model.py
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+# task_1 в путь
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "task_1"))
 
 from domain_model import (
     Admin,
