@@ -40,7 +40,7 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     container_name: itmo-rabbitmq
-    restart: always
+    restart: on-failure
     environment:
       RABBITMQ_DEFAULT_USER: itmo_rabbit
       RABBITMQ_DEFAULT_PASS: itmo_rabbit_pass
@@ -67,7 +67,7 @@ services:
       POSTGRES_PASSWORD: itmo_pass
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     networks:
       - itmo-network
     healthcheck:
@@ -79,3 +79,6 @@ services:
 networks:
   itmo-network:
     driver: bridge
+
+volumes:
+  postgres_data:

@@ -24,8 +24,6 @@ ITMO/
 │   ├── main.py
 │   └── requirements.txt
 ├── data/
-│   ├── postgres/
-│   │   └── .gitkeep
 │   └── rabbitmq/
 │       └── .gitkeep
 ├── task_1/
@@ -55,5 +53,5 @@ ITMO/
 - для rabbitmq настроено хранение данных через volume
 - у rabbitmq включен автоматический перезапуск
 - database работает на образе postgres
-- для database настроено сохранение данных через volume
+- для database настроено сохранение данных через named volume
 
