@@ -1,4 +1,12 @@
-old
-old/
-__pycache__
 __pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+
+.venv/
+venv/
+
+
+data/rabbitmq/*
+!data/rabbitmq/.gitkeep
