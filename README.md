@@ -1,57 +1,164 @@
-# Задание 2
+# Задание 3. ORM и подключение базы данных
 
-Структура проекта и Docker Compose.
+## Описание
 
-## Задача
+В рамках задания объектная модель ML-сервиса из первого задания была связана с реальной реляционной базой данных PostgreSQL через ORM SQLAlchemy.
 
-Нужно организовать структуру backend-проекта и описать структуру приложения через docker-compose.
+Реализованы:
 
-**В проекте подготовлены 4 сервиса:**
+- ORM-модели таблиц
+- связи между сущностями через Foreign Key
+- работа с пользователями
+- работа с балансом и историей транзакций
+- история ML-запросов / предсказаний
+- автоматическая инициализация БД демо-данными
+- тестирование основных бизнес-сценариев
 
-- `app` — backend-приложение
-- `web-proxy` — proxy на Nginx
-- `rabbitmq` — брокер сообщений
-- `database` — база данных PostgreSQL
+## Отображение объектной модели в БД
+
+Отображение сущностей:
+
+- `User` -> `users`
+- `UserBalance` -> `user_balances`
+- `MoneyMove` -> `balance_transactions`
+- `Model` / `SimpleModel` -> `ml_models`
+- `Task` / `TaskResult` -> `prediction_requests`
+
+## Основные таблицы
+
+Таблицы БД:
+
+- `users`
+- `user_balances`
+- `balance_transactions`
+- `ml_models`
+- `prediction_requests`
+
+
+### Пользователи
+
+- создание пользователя
+- загрузка пользователя из БД
+- связь пользователя с балансом
+- связь пользователя с историей транзакций
+- роль пользователя: `user` / `admin`
+
+### Баланс и транзакции
+
+- пополнение баланса
+- списание средств
+- проверка достаточности средств перед списанием
+- запись каждой операции в историю транзакций
+
+### ML-запросы
+
+- запуск предикта по выбранной модели
+- запись истории запросов пользователя
+- сортировка истории по дате
+- сохранение стоимости операции
+- связь запроса с конкретной ML-моделью
+
+### Инициализация БД
+
+При старте приложения автоматически создаются:
+
+- демо-пользователь
+- демо-администратор
+- стартовые балансы
+- базовые ML-модели
+
+Инициализация сделана идемпотентной: повторный запуск не создаёт дубликаты.
+
 
 ## Структура проекта
 
-```text
+~~~
 ITMO/
 ├── app/
-    ├── src/
+│   ├── src/
+│   │   ├── api.py
+│   │   ├── config.py
+│   │   ├── db.py
+│   │   ├── domain_logic.py
+│   │   ├── init_data.py
+│   │   ├── models.py
+│   │   ├── security.py
+│   │   └── services.py
+│   ├── tests/
+│   │   └── test_task3_services.py
 │   ├── .env
 │   ├── Dockerfile
 │   ├── main.py
 │   └── requirements.txt
-├── data/
-│   └── rabbitmq/
-│       └── .gitkeep
 ├── task_1/
-│   ├── domain_model.py
-│   ├── main.py
-│   ├── README.md
-│   └── test/
-│       └── test_domain_model.py
 ├── web-proxy/
-│   └── nginx.conf
 ├── docker-compose.yml
-├── README.md
-└── .gitignore
-```
+└── README.md
+~~~
 
 
-**Основные требования, которые выполнены**
+## Команды запуска и проверки 
 
-- создано 4 сервиса
-- app настроен через env_file
-- исходники app подключаются через volumes
-- app не пробрасывает порты наружу
-- web-proxy работает на Nginx
-- web-proxy зависит от app
-- web-proxy пробрасывает порты 80 и 443
-- rabbitmq пробрасывает порты 5672 и 15672
-- для rabbitmq настроено хранение данных через volume
-- у rabbitmq включен автоматический перезапуск
-- database работает на образе postgres
-- для database настроено сохранение данных через named volume
+~~~
+docker compose up --build
 
+docker compose exec app python -m pytest -q tests
+~~~
+
+
+**Проверка health:**
+~~~
+curl http://localhost/health
+~~~
+
+**Cписок моделей:**
+~~~
+curl http://localhost/models
+~~~
+
+**Создание пользователя:**
+~~~
+curl -X POST http://localhost/users \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "new_user@mail.com",
+    "password": "123456",
+    "role": "user",
+    "start_balance": "100.00"
+  }'
+~~~
+
+**Пополнение баланса:**
+~~~
+curl -X POST http://localhost/users/1/balance/deposit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": "50.00",
+    "description": "manual top up"
+  }'
+~~~
+
+**Запуск предикта:**
+~~~
+curl -X POST http://localhost/predictions/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": 1,
+    "model_id": 1,
+    "rows": [
+      {"value": 5},
+      {"value": 12},
+      {"name": "bad row"}
+    ]
+  }'
+
+~~~
+**История транзакций:**
+~~~
+curl http://localhost/users/1/transactions
+~~~
+
+**История предиктов:**
+~~~
+curl http://localhost/users/1/predictions
+~~~
