@@ -15,14 +15,16 @@ def ensure_user(
     role: UserRole,
     start_balance: Decimal,
 ) -> User:
+    normalized_email = email.strip().lower()
+
     existing = session.execute(
-        select(User).where(User.email == email)
+        select(User).where(User.email == normalized_email)
     ).scalar_one_or_none()
 
     if existing is None:
         return create_user(
             session=session,
-            email=email,
+            email=normalized_email,
             password=password,
             role=role,
             start_balance=start_balance,
