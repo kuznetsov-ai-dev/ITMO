@@ -10,3 +10,5 @@ venv/
 
 data/rabbitmq/*
 !data/rabbitmq/.gitkeep
+
+.env
