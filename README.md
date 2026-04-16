@@ -35,8 +35,8 @@ API предоставляет внешний интерфейс для рабо
 
 Реализованы:
 
-- регистрация нового пользователя
-- проверка логина и пароля
+- регистрация нового пользователя с уникальными login и email
+- авторизация по login или email
 - защищённые эндпоинты для работы от имени текущего пользователя
 
 ### 3. Работа с балансом
@@ -115,11 +115,19 @@ ITMO/
 │   │   ├── domain_logic.py
 │   │   ├── init_data.py
 │   │   ├── models.py
+│   │   ├── routers
+│   │   │   ├── __init__.py
+│   │   │   ├── auth.py
+│   │   │   ├── balance.py
+│   │   │   ├── history.py
+│   │   │   ├── predict.py
+│   │   │   ├── system.py
+│   │   │   └── users.py
 │   │   ├── schemas.py
 │   │   ├── security.py
+│   │   ├── serializers.py
 │   │   └── services.py
 │   ├── tests/
-│   │   ├── test_task3_services.py
 │   │   └── test_task4_api.py
 │   ├── .env
 │   ├── Dockerfile
@@ -156,7 +164,8 @@ http://localhost/docs
 
 Можно войти под демо-пользователем, который создаётся при старте приложения:
 
-- login: `demo.user@mail.com`
+- login: `demo_user`
+- email: `demo.user@mail.com`
 - password: `user123`
 
 ## Примеры запросов
@@ -167,6 +176,7 @@ http://localhost/docs
 curl -X POST http://localhost/auth/register \
   -H "Content-Type: application/json" \
   -d '{
+    "login": "new_user",
     "email": "new_user@mail.com",
     "password": "123456"
   }'
@@ -176,7 +186,7 @@ curl -X POST http://localhost/auth/register \
 
 ~~~
 curl -X POST http://localhost/auth/login \
-  -u new_user@mail.com:123456
+  -u new_user:123456
 ~~~
 
 ### Получить профиль текущего пользователя

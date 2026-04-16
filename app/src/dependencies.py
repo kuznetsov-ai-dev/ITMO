@@ -24,7 +24,7 @@ def get_current_user(
     try:
         return authenticate_user(
             session=db,
-            email=credentials.username,
+            login_or_email=credentials.username,
             password=credentials.password,
         )
     except AuthError as exc:

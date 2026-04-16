@@ -1,29 +1,45 @@
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from src.db import SessionLocal, engine
-from src.models import Base, BalanceTransaction, MLModel, TransactionType, User, UserBalance, UserRole
+from src.models import (
+    Base,
+    BalanceTransaction,
+    MLModel,
+    TransactionType,
+    User,
+    UserBalance,
+    UserRole,
+)
 from src.services import create_ml_model, create_user, get_user
 
 
 def ensure_user(
     session: Session,
+    login: str,
     email: str,
     password: str,
     role: UserRole,
     start_balance: Decimal,
 ) -> User:
+    normalized_login = login.strip().lower()
     normalized_email = email.strip().lower()
 
     existing = session.execute(
-        select(User).where(User.email == normalized_email)
+        select(User).where(
+            or_(
+                User.login == normalized_login,
+                User.email == normalized_email,
+            )
+        )
     ).scalar_one_or_none()
 
     if existing is None:
         return create_user(
             session=session,
+            login=normalized_login,
             email=normalized_email,
             password=password,
             role=role,
@@ -31,6 +47,14 @@ def ensure_user(
         )
 
     changed = False
+
+    if existing.login != normalized_login:
+        existing.login = normalized_login
+        changed = True
+
+    if existing.email != normalized_email:
+        existing.email = normalized_email
+        changed = True
 
     if existing.role != role:
         existing.role = role
@@ -91,6 +115,7 @@ def ensure_model(
 def seed_demo_data(session: Session) -> None:
     ensure_user(
         session=session,
+        login="demo_user",
         email="demo.user@mail.com",
         password="user123",
         role=UserRole.USER,
@@ -99,6 +124,7 @@ def seed_demo_data(session: Session) -> None:
 
     ensure_user(
         session=session,
+        login="demo_admin",
         email="demo.admin@mail.com",
         password="admin123",
         role=UserRole.ADMIN,

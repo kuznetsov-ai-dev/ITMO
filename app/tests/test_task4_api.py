@@ -59,32 +59,53 @@ def client(monkeypatch):
     engine.dispose()
 
 
-def test_register_and_login(client: TestClient):
+def test_register_and_login_by_login(client: TestClient):
     response = client.post(
         "/auth/register",
         json={
+            "login": "user_login",
             "email": "user@mail.com",
             "password": "123456",
         },
     )
     assert response.status_code == 201
     body = response.json()
+    assert body["login"] == "user_login"
     assert body["email"] == "user@mail.com"
     assert body["role"] == "user"
     assert body["balance"] == "0.00"
 
     login_response = client.post(
         "/auth/login",
-        auth=("user@mail.com", "123456"),
+        auth=("user_login", "123456"),
     )
     assert login_response.status_code == 200
-    assert login_response.json()["user"]["email"] == "user@mail.com"
+    assert login_response.json()["user"]["login"] == "user_login"
+
+
+def test_login_by_email_also_works(client: TestClient):
+    client.post(
+        "/auth/register",
+        json={
+            "login": "email_user",
+            "email": "email_user@mail.com",
+            "password": "123456",
+        },
+    )
+
+    login_response = client.post(
+        "/auth/login",
+        auth=("email_user@mail.com", "123456"),
+    )
+    assert login_response.status_code == 200
+    assert login_response.json()["user"]["email"] == "email_user@mail.com"
 
 
 def test_get_balance_and_deposit(client: TestClient):
     client.post(
         "/auth/register",
         json={
+            "login": "money_user",
             "email": "money@mail.com",
             "password": "123456",
         },
@@ -92,7 +113,7 @@ def test_get_balance_and_deposit(client: TestClient):
 
     deposit_response = client.post(
         "/balance/deposit",
-        auth=("money@mail.com", "123456"),
+        auth=("money_user", "123456"),
         json={
             "amount": "50.00",
             "description": "top up",
@@ -103,7 +124,7 @@ def test_get_balance_and_deposit(client: TestClient):
 
     balance_response = client.get(
         "/balance",
-        auth=("money@mail.com", "123456"),
+        auth=("money_user", "123456"),
     )
     assert balance_response.status_code == 200
     assert balance_response.json()["balance"] == "50.00"
@@ -113,6 +134,7 @@ def test_run_prediction_and_get_history(client: TestClient):
     client.post(
         "/auth/register",
         json={
+            "login": "predict_user",
             "email": "predict@mail.com",
             "password": "123456",
         },
@@ -120,20 +142,20 @@ def test_run_prediction_and_get_history(client: TestClient):
 
     client.post(
         "/balance/deposit",
-        auth=("predict@mail.com", "123456"),
+        auth=("predict_user", "123456"),
         json={"amount": "100.00"},
     )
 
     models_response = client.get(
         "/models",
-        auth=("predict@mail.com", "123456"),
+        auth=("predict_user", "123456"),
     )
     assert models_response.status_code == 200
     model_id = models_response.json()[0]["id"]
 
     predict_response = client.post(
         "/predict",
-        auth=("predict@mail.com", "123456"),
+        auth=("predict_user", "123456"),
         json={
             "model_id": model_id,
             "rows": [
@@ -151,14 +173,14 @@ def test_run_prediction_and_get_history(client: TestClient):
 
     tx_history = client.get(
         "/history/transactions",
-        auth=("predict@mail.com", "123456"),
+        auth=("predict_user", "123456"),
     )
     assert tx_history.status_code == 200
     assert len(tx_history.json()) == 2
 
     prediction_history = client.get(
         "/history/predictions",
-        auth=("predict@mail.com", "123456"),
+        auth=("predict_user", "123456"),
     )
     assert prediction_history.status_code == 200
     assert len(prediction_history.json()) == 1
@@ -168,6 +190,7 @@ def test_predict_without_money_returns_business_error(client: TestClient):
     client.post(
         "/auth/register",
         json={
+            "login": "poor_user",
             "email": "poor@mail.com",
             "password": "123456",
         },
@@ -175,13 +198,13 @@ def test_predict_without_money_returns_business_error(client: TestClient):
 
     models_response = client.get(
         "/models",
-        auth=("poor@mail.com", "123456"),
+        auth=("poor_user", "123456"),
     )
     model_id = models_response.json()[0]["id"]
 
     response = client.post(
         "/predict",
-        auth=("poor@mail.com", "123456"),
+        auth=("poor_user", "123456"),
         json={
             "model_id": model_id,
             "rows": [{"value": 10}],
@@ -198,10 +221,11 @@ def test_request_without_auth_returns_401(client: TestClient):
     assert response.json()["error"]["code"] == "unauthorized"
 
 
-def test_register_duplicate_user_returns_409(client: TestClient):
+def test_register_duplicate_email_returns_409(client: TestClient):
     first_response = client.post(
         "/auth/register",
         json={
+            "login": "first_login",
             "email": "dup@mail.com",
             "password": "123456",
         },
@@ -211,7 +235,32 @@ def test_register_duplicate_user_returns_409(client: TestClient):
     second_response = client.post(
         "/auth/register",
         json={
+            "login": "second_login",
             "email": "dup@mail.com",
+            "password": "123456",
+        },
+    )
+    assert second_response.status_code == 409
+    body = second_response.json()
+    assert body["error"]["code"] == "conflict"
+
+
+def test_register_duplicate_login_returns_409(client: TestClient):
+    first_response = client.post(
+        "/auth/register",
+        json={
+            "login": "same_login",
+            "email": "one@mail.com",
+            "password": "123456",
+        },
+    )
+    assert first_response.status_code == 201
+
+    second_response = client.post(
+        "/auth/register",
+        json={
+            "login": "same_login",
+            "email": "two@mail.com",
             "password": "123456",
         },
     )
@@ -224,6 +273,7 @@ def test_predict_with_all_invalid_rows_returns_400(client: TestClient):
     client.post(
         "/auth/register",
         json={
+            "login": "invalid_rows_user",
             "email": "invalidrows@mail.com",
             "password": "123456",
         },
@@ -231,20 +281,20 @@ def test_predict_with_all_invalid_rows_returns_400(client: TestClient):
 
     client.post(
         "/balance/deposit",
-        auth=("invalidrows@mail.com", "123456"),
+        auth=("invalid_rows_user", "123456"),
         json={"amount": "100.00"},
     )
 
     models_response = client.get(
         "/models",
-        auth=("invalidrows@mail.com", "123456"),
+        auth=("invalid_rows_user", "123456"),
     )
     assert models_response.status_code == 200
     model_id = models_response.json()[0]["id"]
 
     response = client.post(
         "/predict",
-        auth=("invalidrows@mail.com", "123456"),
+        auth=("invalid_rows_user", "123456"),
         json={
             "model_id": model_id,
             "rows": [

@@ -1,8 +1,12 @@
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
+
+
+LOGIN_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]+$")
 
 
 class ErrorInfo(BaseModel):
@@ -16,8 +20,27 @@ class ErrorResponse(BaseModel):
 
 
 class UserRegisterIn(BaseModel):
+    login: str = Field(min_length=3, max_length=50)
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
+
+    @field_validator("login")
+    @classmethod
+    def login_must_be_valid(cls, value: str) -> str:
+        normalized = value.strip().lower()
+
+        if not normalized:
+            raise ValueError("Логин не может быть пустым")
+
+        if "@" in normalized:
+            raise ValueError("Логин не должен содержать символ @")
+
+        if not LOGIN_PATTERN.fullmatch(normalized):
+            raise ValueError(
+                "Логин может содержать только буквы, цифры, точку, дефис и подчёркивание"
+            )
+
+        return normalized
 
     @field_validator("password")
     @classmethod
@@ -29,6 +52,7 @@ class UserRegisterIn(BaseModel):
 
 class UserResponse(BaseModel):
     id: int
+    login: str
     email: EmailStr
     role: str
     balance: str

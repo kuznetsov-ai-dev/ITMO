@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from src.domain_logic import predict_with_simple_model, validate_prediction_rows
@@ -46,6 +46,10 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+def normalize_login(login: str) -> str:
+    return login.strip().lower()
+
+
 def get_user(session: Session, user_id: int) -> User:
     stmt = (
         select(User)
@@ -68,10 +72,39 @@ def get_user_by_email(session: Session, email: str) -> User | None:
     return session.execute(stmt).scalar_one_or_none()
 
 
-def authenticate_user(session: Session, email: str, password: str) -> User:
-    user = get_user_by_email(session, email)
+def get_user_by_login(session: Session, login: str) -> User | None:
+    normalized_login = normalize_login(login)
+    stmt = (
+        select(User)
+        .where(User.login == normalized_login)
+        .options(selectinload(User.balance))
+    )
+    return session.execute(stmt).scalar_one_or_none()
+
+
+def get_user_by_login_or_email(session: Session, login_or_email: str) -> User | None:
+    normalized_value = login_or_email.strip().lower()
+
+    if not normalized_value:
+        return None
+
+    stmt = (
+        select(User)
+        .where(
+            or_(
+                User.login == normalized_value,
+                User.email == normalized_value,
+            )
+        )
+        .options(selectinload(User.balance))
+    )
+    return session.execute(stmt).scalar_one_or_none()
+
+
+def authenticate_user(session: Session, login_or_email: str, password: str) -> User:
+    user = get_user_by_login_or_email(session, login_or_email)
     if user is None or not verify_password(password, user.password_hash):
-        raise AuthError("Неверный email или пароль")
+        raise AuthError("Неверный логин/email или пароль")
     return user
 
 
@@ -85,21 +118,33 @@ def get_model(session: Session, model_id: int) -> MLModel:
 
 def create_user(
     session: Session,
+    login: str,
     email: str,
     password: str,
     role: UserRole = UserRole.USER,
     start_balance: Decimal = Decimal("0.00"),
 ) -> User:
+    normalized_login = normalize_login(login)
     normalized_email = normalize_email(email)
+
+    if not normalized_login:
+        raise ValidationError("Логин не может быть пустым")
+
+    if "@" in normalized_login:
+        raise ValidationError("Логин не должен содержать символ @")
 
     if not normalized_email:
         raise ValidationError("Email не может быть пустым")
 
-    if not password:
+    if not password or not password.strip():
         raise ValidationError("Пароль не может быть пустым")
 
-    existing = get_user_by_email(session, normalized_email)
-    if existing is not None:
+    existing_by_login = get_user_by_login(session, normalized_login)
+    if existing_by_login is not None:
+        raise ConflictError(f"Пользователь с логином {normalized_login} уже существует")
+
+    existing_by_email = get_user_by_email(session, normalized_email)
+    if existing_by_email is not None:
         raise ConflictError(f"Пользователь с email {normalized_email} уже существует")
 
     if start_balance < 0:
@@ -107,6 +152,7 @@ def create_user(
 
     try:
         user = User(
+            login=normalized_login,
             email=normalized_email,
             password_hash=make_password_hash(password),
             role=role,
