@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from src.db import get_db
@@ -7,11 +7,16 @@ from src.models import User
 from src.schemas import (
     ErrorResponse,
     MLModelResponse,
-    PredictionRunIn,
-    PredictionRunResponse,
+    PredictTaskAcceptedResponse,
+    PredictTaskIn,
+    PredictionResponse,
 )
 from src.serializers import serialize_model, serialize_prediction
-from src.services import get_user, list_ml_models, run_prediction
+from src.services import (
+    create_prediction_task,
+    get_prediction_by_task_id,
+    list_ml_models,
+)
 
 
 router = APIRouter(tags=["predict"])
@@ -32,7 +37,8 @@ def get_models(
 
 @router.post(
     "/predict",
-    response_model=PredictionRunResponse,
+    response_model=PredictTaskAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
     responses={
         400: {"model": ErrorResponse},
         401: {"model": ErrorResponse},
@@ -41,19 +47,40 @@ def get_models(
     },
 )
 def run_prediction_endpoint(
-    payload: PredictionRunIn,
+    payload: PredictTaskIn,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = run_prediction(
+    task = create_prediction_task(
         session=db,
         user_id=current_user.id,
-        model_id=payload.model_id,
-        rows=payload.rows,
+        model_name=payload.model,
+        features=payload.features,
     )
-    updated_user = get_user(db, current_user.id)
 
     return {
-        "balance": str(updated_user.balance.amount),
-        "prediction": serialize_prediction(result),
+        "task_id": task.task_id,
+        "status": task.status.value,
     }
+
+
+@router.get(
+    "/predict/{task_id}",
+    response_model=PredictionResponse,
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+    },
+)
+def get_prediction_status_endpoint(
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = get_prediction_by_task_id(db, task_id)
+
+    if task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Нет доступа к этой задаче")
+
+    return serialize_prediction(task)

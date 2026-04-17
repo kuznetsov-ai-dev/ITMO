@@ -1,45 +1,51 @@
 from typing import Any
 
 
-def validate_prediction_rows(
-    rows: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    good_rows: list[dict[str, Any]] = []
-    errors: list[dict[str, Any]] = []
+def validate_task_features(
+    features: dict[str, Any] | Any,
+) -> tuple[dict[str, float], list[dict[str, str]]]:
+    if not isinstance(features, dict):
+        return {}, [
+            {
+                "field_name": "features",
+                "text": "features должен быть объектом",
+            }
+        ]
 
-    for index, row in enumerate(rows):
-        if "value" not in row:
+    if not features:
+        return {}, [
+            {
+                "field_name": "features",
+                "text": "features не должен быть пустым",
+            }
+        ]
+
+    normalized_features: dict[str, float] = {}
+    errors: list[dict[str, str]] = []
+
+    for key, value in features.items():
+        if not isinstance(key, str) or not key.strip():
             errors.append(
                 {
-                    "row_num": index,
-                    "field_name": "value",
-                    "text": "нет такого поля",
+                    "field_name": "features",
+                    "text": "ключ признака должен быть непустой строкой",
                 }
             )
             continue
 
-        if not isinstance(row["value"], (int, float)):
+        if not isinstance(value, (int, float)):
             errors.append(
                 {
-                    "row_num": index,
-                    "field_name": "value",
-                    "text": "тут должно быть число",
+                    "field_name": key,
+                    "text": "значение признака должно быть числом",
                 }
             )
             continue
 
-        good_rows.append(row)
+        normalized_features[key.strip()] = float(value)
 
-    return good_rows, errors
+    return normalized_features, errors
 
 
-def predict_with_simple_model(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
-
-    for row in rows:
-        new_row = row.copy()
-        value = row.get("value", 0)
-        new_row["answer"] = "хорошо" if value >= 10 else "плохо"
-        result.append(new_row)
-
-    return result
+def predict_demo_model(features: dict[str, float]) -> float:
+    return round(sum(features.values()), 2)

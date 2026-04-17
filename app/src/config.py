@@ -24,6 +24,9 @@ class Settings:
 
     rabbitmq_host: str = os.getenv("RABBITMQ_HOST", "rabbitmq")
     rabbitmq_port: int = int(os.getenv("RABBITMQ_PORT", "5672"))
+    rabbitmq_user: str = os.getenv("RABBITMQ_USER", "itmo_rabbit")
+    rabbitmq_password: str = os.getenv("RABBITMQ_PASSWORD", "itmo_rabbit_pass")
+    rabbitmq_queue: str = os.getenv("RABBITMQ_QUEUE", "ml_task_queue")
 
     @property
     def database_url(self) -> str:

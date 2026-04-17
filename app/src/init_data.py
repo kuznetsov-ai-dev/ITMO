@@ -147,6 +147,14 @@ def seed_demo_data(session: Session) -> None:
         is_active=True,
     )
 
+    ensure_model(
+        session=session,
+        name="demo_model",
+        description="Простая demo-модель для асинхронных задач через RabbitMQ",
+        price=Decimal("0.00"),
+        is_active=True,
+    )
+
 
 def init_database() -> None:
     Base.metadata.create_all(bind=engine)

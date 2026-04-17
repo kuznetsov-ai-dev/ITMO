@@ -126,6 +126,8 @@ class PredictionRequest(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True)
+
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
@@ -134,22 +136,27 @@ class PredictionRequest(Base):
         ForeignKey("ml_models.id", ondelete="RESTRICT"),
         nullable=False,
     )
+
     status: Mapped[TaskStatus] = mapped_column(
         Enum(TaskStatus, name="task_status"),
         nullable=False,
         default=TaskStatus.NEW,
     )
-    input_payload: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+
+    input_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     result_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
-    total_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     valid_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     invalid_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     charged_amount: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
         nullable=False,
         default=Decimal("0.00"),
     )
+
+    worker_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

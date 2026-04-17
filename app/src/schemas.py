@@ -102,17 +102,32 @@ class MLModelResponse(BaseModel):
     created_at: datetime
 
 
-class PredictionRunIn(BaseModel):
-    model_id: int = Field(gt=0)
-    rows: list[dict[str, Any]] = Field(min_length=1)
+class PredictTaskIn(BaseModel):
+    model: str = Field(min_length=1, max_length=150)
+    features: dict[str, float] = Field(min_length=1)
+
+    @field_validator("model")
+    @classmethod
+    def validate_model_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Имя модели не может быть пустым")
+        return normalized
+
+
+class PredictTaskAcceptedResponse(BaseModel):
+    task_id: str
+    status: str
 
 
 class PredictionResponse(BaseModel):
     id: int
+    task_id: str
     user_id: int
     model_id: int
     model_name: str | None = None
     status: str
+    worker_id: str | None = None
     charged_amount: str
     total_rows: int
     valid_rows: int
@@ -120,8 +135,3 @@ class PredictionResponse(BaseModel):
     created_at: datetime
     finished_at: datetime | None = None
     result_payload: dict[str, Any] | None = None
-
-
-class PredictionRunResponse(BaseModel):
-    balance: str
-    prediction: PredictionResponse
