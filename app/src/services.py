@@ -1,6 +1,7 @@
 import json
 import uuid
 from decimal import Decimal
+from typing import Any
 
 import pika
 from sqlalchemy import or_, select
@@ -52,6 +53,55 @@ def normalize_email(email: str) -> str:
 
 def normalize_login(login: str) -> str:
     return login.strip().lower()
+
+
+def normalize_prediction_rows(
+    features: dict[str, Any] | None = None,
+    rows: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    if features is not None and rows:
+        raise ValidationError("Передайте либо features, либо rows")
+
+    normalized_rows: list[dict[str, Any]] = []
+
+    if rows:
+        for index, raw_row in enumerate(rows, start=1):
+            if not isinstance(raw_row, dict):
+                normalized_rows.append(
+                    {
+                        "row_id": f"row-{index}",
+                        "features": raw_row,
+                    }
+                )
+                continue
+
+            row_id = raw_row.get("row_id")
+            if row_id is None or not str(row_id).strip():
+                row_id = f"row-{index}"
+
+            normalized_rows.append(
+                {
+                    "row_id": str(row_id).strip(),
+                    "features": raw_row.get("features"),
+                }
+            )
+    elif features is not None:
+        if not isinstance(features, dict):
+            raise ValidationError("features должен быть объектом")
+
+        if not features:
+            raise ValidationError("features не должен быть пустым")
+
+        normalized_rows.append(
+            {
+                "row_id": "row-1",
+                "features": features,
+            }
+        )
+    else:
+        raise ValidationError("Нужно передать либо features, либо rows")
+
+    return normalized_rows
 
 
 def get_user(session: Session, user_id: int) -> User:
@@ -257,6 +307,26 @@ def list_ml_models(session: Session, only_active: bool = False) -> list[MLModel]
     return list(session.execute(stmt).scalars().all())
 
 
+def list_users(session: Session) -> list[User]:
+    stmt = (
+        select(User)
+        .options(selectinload(User.balance))
+        .order_by(User.id.asc())
+    )
+    return list(session.execute(stmt).scalars().all())
+
+
+def list_all_transactions(session: Session) -> list[BalanceTransaction]:
+    stmt = (
+        select(BalanceTransaction)
+        .options(selectinload(BalanceTransaction.ml_request))
+        .order_by(
+            BalanceTransaction.created_at.desc(),
+            BalanceTransaction.id.desc(),
+        )
+    )
+    return list(session.execute(stmt).scalars().all())
+
 def deposit_balance(
     session: Session,
     user_id: int,
@@ -324,6 +394,7 @@ def list_transactions(session: Session, user_id: int) -> list[BalanceTransaction
     stmt = (
         select(BalanceTransaction)
         .where(BalanceTransaction.user_id == user_id)
+        .options(selectinload(BalanceTransaction.ml_request))
         .order_by(
             BalanceTransaction.created_at.desc(),
             BalanceTransaction.id.desc(),
@@ -347,19 +418,25 @@ def get_prediction_history(session: Session, user_id: int) -> list[PredictionReq
     return list(session.execute(stmt).scalars().all())
 
 
-def build_task_message(features: dict[str, float], model_name: str) -> dict:
+def build_task_message(rows: list[dict[str, Any]], model_name: str) -> dict[str, Any]:
     task_id = str(uuid.uuid4())
     timestamp = utc_now().replace(tzinfo=None, microsecond=0).isoformat()
 
-    return {
+    payload: dict[str, Any] = {
         "task_id": task_id,
-        "features": features,
+        "rows": rows,
         "model": model_name,
         "timestamp": timestamp,
+        "total_rows": len(rows),
     }
 
+    if len(rows) == 1:
+        payload["features"] = rows[0].get("features")
 
-def publish_task_message(task_message: dict) -> None:
+    return payload
+
+
+def publish_task_message(task_message: dict[str, Any]) -> None:
     credentials = pika.PlainCredentials(
         username=settings.rabbitmq_user,
         password=settings.rabbitmq_password,
@@ -397,7 +474,8 @@ def create_prediction_task(
     session: Session,
     user_id: int,
     model_name: str,
-    features: dict[str, float],
+    features: dict[str, Any] | None = None,
+    rows: list[dict[str, Any]] | None = None,
 ) -> PredictionRequest:
     user = get_user(session, user_id)
     model = get_model_by_name(session, model_name)
@@ -405,7 +483,17 @@ def create_prediction_task(
     if not model.is_active:
         raise ValidationError("Модель сейчас неактивна")
 
-    task_message = build_task_message(features=features, model_name=model.name)
+    if user.balance.amount <= 0:
+        raise InsufficientFundsError("Баланс должен быть больше нуля")
+
+    if user.balance.amount < model.price:
+        raise InsufficientFundsError("На балансе недостаточно средств для выполнения запроса")
+
+    normalized_rows = normalize_prediction_rows(features=features, rows=rows)
+    if not normalized_rows:
+        raise ValidationError("Не переданы данные для обработки")
+
+    task_message = build_task_message(rows=normalized_rows, model_name=model.name)
 
     try:
         request = PredictionRequest(
@@ -415,7 +503,7 @@ def create_prediction_task(
             status=TaskStatus.NEW,
             input_payload=task_message,
             result_payload=None,
-            total_rows=1,
+            total_rows=len(normalized_rows),
             valid_rows=0,
             invalid_rows=0,
             charged_amount=Decimal("0.00"),
@@ -437,6 +525,13 @@ def create_prediction_task(
                 "task_id": request.task_id,
                 "worker_id": None,
                 "status": "error",
+                "accepted_rows": [],
+                "rejected_rows": [],
+                "summary": {
+                    "total_rows": request.total_rows,
+                    "valid_rows": 0,
+                    "invalid_rows": 0,
+                },
                 "errors": [
                     {
                         "field_name": "rabbitmq",
@@ -473,45 +568,167 @@ def process_prediction_task(
         session.refresh(request)
 
         payload = request.input_payload or {}
-        features = payload.get("features")
+        raw_rows = payload.get("rows")
+        if raw_rows is None and payload.get("features") is not None:
+            raw_rows = [
+                {
+                    "row_id": "row-1",
+                    "features": payload.get("features"),
+                }
+            ]
+
+        global_errors: list[dict[str, str]] = []
+        if not isinstance(raw_rows, list) or not raw_rows:
+            raw_rows = []
+            global_errors.append(
+                {
+                    "field_name": "rows",
+                    "text": "Не переданы данные для обработки",
+                }
+            )
+
         payload_model_name = payload.get("model")
-
-        normalized_features, errors = validate_task_features(features)
-
         if payload_model_name != request.ml_model.name:
-            errors.append(
+            global_errors.append(
                 {
                     "field_name": "model",
                     "text": "имя модели в сообщении не совпадает с моделью задачи",
                 }
             )
 
-        if errors:
+        valid_results: list[dict[str, Any]] = []
+        rejected_rows: list[dict[str, Any]] = []
+
+        for index, raw_row in enumerate(raw_rows, start=1):
+            if not isinstance(raw_row, dict):
+                rejected_rows.append(
+                    {
+                        "row_id": f"row-{index}",
+                        "errors": [
+                            {
+                                "field_name": "row",
+                                "text": "строка должна быть объектом",
+                            }
+                        ],
+                        "input": raw_row,
+                    }
+                )
+                continue
+
+            row_id = str(raw_row.get("row_id") or f"row-{index}").strip() or f"row-{index}"
+            normalized_features, errors = validate_task_features(raw_row.get("features"))
+
+            if errors:
+                rejected_rows.append(
+                    {
+                        "row_id": row_id,
+                        "errors": errors,
+                        "input": raw_row.get("features"),
+                    }
+                )
+                continue
+
+            valid_results.append(
+                {
+                    "row_id": row_id,
+                    "features": normalized_features,
+                    "prediction": predict_demo_model(normalized_features),
+                }
+            )
+
+        total_rows = len(raw_rows)
+        summary = {
+            "total_rows": total_rows,
+            "valid_rows": len(valid_results),
+            "invalid_rows": len(rejected_rows),
+        }
+
+        if global_errors or not valid_results:
             request.status = TaskStatus.ERROR
-            request.total_rows = 1
+            request.total_rows = total_rows
             request.valid_rows = 0
-            request.invalid_rows = len(errors)
+            request.invalid_rows = len(rejected_rows) if total_rows else 1
             request.result_payload = {
                 "task_id": request.task_id,
                 "worker_id": worker_id,
                 "status": "error",
-                "errors": errors,
+                "accepted_rows": [],
+                "rejected_rows": rejected_rows,
+                "summary": {
+                    "total_rows": total_rows,
+                    "valid_rows": 0,
+                    "invalid_rows": len(rejected_rows) if total_rows else 1,
+                },
+                "errors": global_errors,
             }
             request.finished_at = utc_now()
-        else:
-            prediction = predict_demo_model(normalized_features)
+            session.add(request)
+            session.commit()
+            session.refresh(request)
+            return get_prediction_by_task_id(session, task_id)
 
-            request.status = TaskStatus.DONE
-            request.total_rows = 1
-            request.valid_rows = 1
-            request.invalid_rows = 0
+        user = get_user(session, request.user_id)
+        if user.balance.amount <= 0:
+            global_errors.append(
+                {
+                    "field_name": "balance",
+                    "text": "Баланс стал нулевым или отрицательным до завершения обработки",
+                }
+            )
+        elif user.balance.amount < request.ml_model.price:
+            global_errors.append(
+                {
+                    "field_name": "balance",
+                    "text": "Во время обработки на балансе оказалось недостаточно средств",
+                }
+            )
+
+        if global_errors:
+            request.status = TaskStatus.ERROR
+            request.total_rows = total_rows
+            request.valid_rows = len(valid_results)
+            request.invalid_rows = len(rejected_rows)
             request.result_payload = {
                 "task_id": request.task_id,
-                "prediction": prediction,
                 "worker_id": worker_id,
-                "status": "success",
+                "status": "error",
+                "accepted_rows": valid_results,
+                "rejected_rows": rejected_rows,
+                "summary": summary,
+                "errors": global_errors,
             }
             request.finished_at = utc_now()
+            session.add(request)
+            session.commit()
+            session.refresh(request)
+            return get_prediction_by_task_id(session, task_id)
+
+        request.status = TaskStatus.DONE
+        request.total_rows = total_rows
+        request.valid_rows = len(valid_results)
+        request.invalid_rows = len(rejected_rows)
+        request.result_payload = {
+            "task_id": request.task_id,
+            "worker_id": worker_id,
+            "status": "success",
+            "accepted_rows": valid_results,
+            "rejected_rows": rejected_rows,
+            "summary": summary,
+        }
+        request.finished_at = utc_now()
+
+        if request.charged_amount == 0 and request.ml_model.price > 0:
+            user.balance.amount -= request.ml_model.price
+            request.charged_amount = request.ml_model.price
+            session.add(
+                BalanceTransaction(
+                    user_id=request.user_id,
+                    amount=request.ml_model.price,
+                    transaction_type=TransactionType.CHARGE,
+                    description=f"ML request {request.task_id}",
+                    ml_request_id=request.id,
+                )
+            )
 
         session.add(request)
         session.commit()
@@ -524,13 +741,20 @@ def process_prediction_task(
         request = get_prediction_by_task_id(session, task_id)
         request.status = TaskStatus.ERROR
         request.worker_id = worker_id
-        request.total_rows = 1
+        request.total_rows = request.total_rows or 1
         request.valid_rows = 0
-        request.invalid_rows = 1
+        request.invalid_rows = max(request.invalid_rows, 1)
         request.result_payload = {
             "task_id": task_id,
             "worker_id": worker_id,
             "status": "error",
+            "accepted_rows": [],
+            "rejected_rows": [],
+            "summary": {
+                "total_rows": request.total_rows,
+                "valid_rows": 0,
+                "invalid_rows": request.invalid_rows,
+            },
             "errors": [
                 {
                     "field_name": "internal",

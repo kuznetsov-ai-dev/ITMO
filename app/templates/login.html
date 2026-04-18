@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Вход{% endblock %}
+
+{% block content %}
+<div class="form-card">
+    <h1>Вход</h1>
+    <p>Можно входить по логину или по email.</p>
+
+    {% if form_error %}
+        <div class="alert alert-error">{{ form_error }}</div>
+    {% endif %}
+
+    <form method="post" action="/login" class="form">
+        <label>Логин или email</label>
+        <input
+            type="text"
+            name="username"
+            value="{{ form_data.username if form_data else '' }}"
+            required
+        >
+
+        <label>Пароль</label>
+        <input type="password" name="password" required>
+
+        <button class="btn" type="submit">Войти</button>
+    </form>
+</div>
+{% endblock %}

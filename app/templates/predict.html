@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}ML-запрос{% endblock %}
+
+{% block content %}
+<h1>Выполнение ML-запроса</h1>
+
+<div class="card">
+    <p>
+        Можно отправить:
+        одну запись через форму JSON,
+        список записей через JSON,
+        либо CSV-файл.
+    </p>
+
+    {% if form_error %}
+        <div class="alert alert-error">{{ form_error }}</div>
+    {% endif %}
+
+    <form method="post" action="/cabinet/predict" enctype="multipart/form-data" class="form">
+        <label>Модель</label>
+        <select name="model" required>
+            {% for model in models %}
+                <option
+                    value="{{ model.name }}"
+                    {% if form_data and form_data.model == model.name %}selected{% endif %}
+                >
+                    {{ model.name }} ({{ model.price }})
+                </option>
+            {% endfor %}
+        </select>
+
+        <label>Одна запись в JSON</label>
+        <textarea name="raw_features" rows="8" placeholder='{"x1": 1.2, "x2": 5.7}'>{{ form_data.raw_features if form_data else '' }}</textarea>
+
+        <label>Список записей в JSON</label>
+        <textarea name="raw_rows" rows="10" placeholder='[{"row_id":"r1","features":{"x1":1.2,"x2":5.7}},{"row_id":"r2","features":{"x1":"bad","x2":10}}]'>{{ form_data.raw_rows if form_data else '' }}</textarea>
+
+        <label>Или CSV-файл</label>
+        <input type="file" name="csv_file" accept=".csv">
+
+        <button class="btn" type="submit">Отправить запрос</button>
+    </form>
+</div>
+
+<div class="grid-two">
+    <div class="card">
+        <h2>Пример одной записи</h2>
+        <pre>{
+  "x1": 1.2,
+  "x2": 5.7
+}</pre>
+    </div>
+
+    <div class="card">
+        <h2>Пример списка</h2>
+        <pre>[
+  {
+    "row_id": "good-1",
+    "features": {"x1": 1.2, "x2": 5.7}
+  },
+  {
+    "row_id": "bad-1",
+    "features": {"x1": "oops", "x2": 10}
+  }
+]</pre>
+    </div>
+</div>
+{% endblock %}

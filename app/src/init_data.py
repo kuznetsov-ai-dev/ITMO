@@ -151,7 +151,7 @@ def seed_demo_data(session: Session) -> None:
         session=session,
         name="demo_model",
         description="Простая demo-модель для асинхронных задач через RabbitMQ",
-        price=Decimal("0.00"),
+        price=Decimal("10.00"),
         is_active=True,
     )
 

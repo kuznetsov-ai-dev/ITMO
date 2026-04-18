@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Админ-панель{% endblock %}
+
+{% block content %}
+<h1>Администрирование</h1>
+
+<div class="card">
+    <h2>Пользователи</h2>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Логин</th>
+                <th>Email</th>
+                <th>Роль</th>
+                <th>Баланс</th>
+                <th>Пополнить</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+                <tr>
+                    <td>{{ user.id }}</td>
+                    <td>{{ user.login }}</td>
+                    <td>{{ user.email }}</td>
+                    <td>{{ user.role.value }}</td>
+                    <td>{{ user.balance.amount if user.balance else '0.00' }}</td>
+                    <td>
+                        <form method="post" action="/admin/users/{{ user.id }}/deposit" class="form-inline">
+                            <input type="number" step="0.01" min="1" name="amount" placeholder="Сумма" required>
+                            <button class="btn" type="submit">ОК</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>Все транзакции в системе</h2>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th>User ID</th>
+                <th>Тип</th>
+                <th>Сумма</th>
+                <th>Описание</th>
+                <th>task_id</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in transactions %}
+                <tr>
+                    <td>{{ item.created_at }}</td>
+                    <td>{{ item.user_id }}</td>
+                    <td>{{ item.transaction_type.value }}</td>
+                    <td>{{ item.amount }}</td>
+                    <td>{{ item.description or '-' }}</td>
+                    <td>{{ item.ml_request.task_id if item.ml_request else '-' }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

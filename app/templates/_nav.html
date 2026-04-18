@@ -1,0 +1,24 @@
+<nav class="navbar">
+    <div class="container navbar-inner">
+        <a class="brand" href="/">ITMO ML Service</a>
+
+        <div class="nav-links">
+            <a href="/">Главная</a>
+
+            {% if current_user %}
+                <a href="/cabinet">Кабинет</a>
+                <a href="/cabinet/predict">ML-запрос</a>
+                <a href="/cabinet/history">История</a>
+
+                {% if current_user.role.value == "admin" %}
+                    <a href="/admin">Админ</a>
+                {% endif %}
+
+                <a href="/logout">Выход</a>
+            {% else %}
+                <a href="/login">Вход</a>
+                <a href="/register">Регистрация</a>
+            {% endif %}
+        </div>
+    </div>
+</nav>

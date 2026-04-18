@@ -33,6 +33,7 @@ def serialize_transaction(tx: BalanceTransaction) -> dict:
         "transaction_type": tx.transaction_type.value,
         "description": tx.description,
         "ml_request_id": tx.ml_request_id,
+        "task_id": tx.ml_request.task_id if tx.ml_request else None,
         "created_at": tx.created_at,
     }
 
@@ -52,5 +53,6 @@ def serialize_prediction(item: PredictionRequest) -> dict:
         "invalid_rows": item.invalid_rows,
         "created_at": item.created_at,
         "finished_at": item.finished_at,
+        "input_payload": item.input_payload,
         "result_payload": item.result_payload,
     }

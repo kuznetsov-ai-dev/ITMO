@@ -3,7 +3,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 
 from src.db import get_db
-from src.models import User
+from src.models import User, UserRole
 from src.services import AuthError, authenticate_user
 
 
@@ -33,3 +33,12 @@ def get_current_user(
             detail=str(exc),
             headers={"WWW-Authenticate": "Basic"},
         ) from exc
+
+
+def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Требуются права администратора",
+        )
+    return current_user

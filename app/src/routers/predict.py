@@ -51,16 +51,20 @@ def run_prediction_endpoint(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    rows = [row.model_dump() for row in payload.rows] if payload.rows else None
+
     task = create_prediction_task(
         session=db,
         user_id=current_user.id,
         model_name=payload.model,
         features=payload.features,
+        rows=rows,
     )
 
     return {
         "task_id": task.task_id,
         "status": task.status.value,
+        "total_rows": task.total_rows,
     }
 
 
