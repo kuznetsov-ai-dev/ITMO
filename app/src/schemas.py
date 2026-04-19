@@ -114,6 +114,13 @@ class PredictTaskIn(BaseModel):
             raise ValueError("Имя модели не может быть пустым")
         return normalized
 
+    @field_validator("features")
+    @classmethod
+    def validate_features_not_empty(cls, value: dict[str, float]) -> dict[str, float]:
+        if not value:
+            raise ValueError("features не должен быть пустым")
+        return value
+
 
 class PredictTaskAcceptedResponse(BaseModel):
     task_id: str

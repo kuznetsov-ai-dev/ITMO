@@ -13,7 +13,7 @@
 
 FastAPI принимает входящий запрос, формирует ML-задачу, сохраняет её в PostgreSQL и отправляет сообщение в очередь RabbitMQ.
 
-Воркеры получают задачи из очереди, валидируют входные данные, выполняют mock ML-predict и сохраняют результат обработки в базе данных.
+Воркеры получают задачи из очереди, валидируют входные данные, выполняют учебный ML-predict и сохраняют результат обработки в базе данных.
 
 ---
 
@@ -28,6 +28,13 @@ Publisher реализован внутри FastAPI приложения.
 - `POST /predict` — создать ML-задачу и отправить её в RabbitMQ
 - `GET /predict/{task_id}` — получить статус и результат задачи
 - `GET /models` — получить список доступных моделей
+
+
+При создании задачи система до отправки в RabbitMQ проверяет баланс пользователя.
+Если средств недостаточно, запрос сразу завершается ошибкой и задача не отправляется в очередь.
+
+Если средств достаточно, стоимость модели списывается сразу и создаётся транзакция типа `charge`.
+Если обработка задачи завершится ошибкой, пользователю автоматически создаётся возврат средств через транзакцию типа `deposit`.
 
 ### 2. RabbitMQ
 
@@ -54,7 +61,7 @@ RabbitMQ развёрнут через Docker Compose.
 - получает сообщение из очереди
 - извлекает `task_id`
 - валидирует `features`
-- выполняет mock ML-predict
+- выполняет учебный ML-predict
 - записывает результат в PostgreSQL
 - сохраняет `worker_id` и статус обработки
 
@@ -66,10 +73,9 @@ RabbitMQ развёрнут через Docker Compose.
 {
   "task_id": "uuid",
   "features": {
-    "x1": 1.2,
-    "x2": 5.7
+    "value": 12
   },
-  "model": "demo_model",
+  "model": "simple-quality-model",
   "timestamp": "2026-01-01T12:00:00"
 }
 ~~~
@@ -81,9 +87,11 @@ RabbitMQ развёрнут через Docker Compose.
 ~~~json
 {
   "task_id": "uuid",
-  "prediction": 6.9,
   "worker_id": "worker-1",
-  "status": "success"
+  "status": "success",
+  "prediction": "хорошо",
+  "value": 12.0,
+  "threshold": 10.0
 }
 ~~~
 
@@ -164,22 +172,26 @@ http://localhost:15672
 
 ---
 
-## Демо-модель
+## Учебная модель
 
 Для демонстрации используется модель:
 
-- `demo_model`
+- `simple-quality-model`
 
-Mock-предикт рассчитывается как сумма всех числовых признаков.
+Логика модели:
+
+- обязателен числовой признак `value`
+- если `value >= 10`, модель возвращает `prediction = "хорошо"`
+- если `value < 10`, модель возвращает `prediction = "плохо"`
 
 Пример:
 
-- `x1 = 1.2`
-- `x2 = 5.7`
+- `value = 12`
 
 Результат:
 
-- `prediction = 6.9`
+- `prediction = "хорошо"`
+- `threshold = 10.0`
 
 ---
 
@@ -218,10 +230,9 @@ curl -X POST http://localhost/predict \
   -u new_user:123456 \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "demo_model",
+    "model": "simple-quality-model",
     "features": {
-      "x1": 1.2,
-      "x2": 5.7
+      "value": 12
     }
   }'
 ~~~
@@ -235,12 +246,43 @@ curl -X POST http://localhost/predict \
 }
 ~~~
 
+После создания задачи стоимость модели списывается сразу.
+Для `simple-quality-model` при начальном балансе `100.00` баланс пользователя станет `75.00`.
+
 ### Проверить статус задачи
 
 ~~~bash
 curl http://localhost/predict/ec8d4b3e-8f67-4ae4-9fde-c3e69c06285f \
   -u new_user:123456
 ~~~
+
+
+Пример успешного результата:
+
+~~~json
+{
+  "id": 1,
+  "task_id": "ec8d4b3e-8f67-4ae4-9fde-c3e69c06285f",
+  "user_id": 4,
+  "model_id": 1,
+  "model_name": "simple-quality-model",
+  "status": "done",
+  "worker_id": "worker-1",
+  "charged_amount": "25.00",
+  "total_rows": 1,
+  "valid_rows": 1,
+  "invalid_rows": 0,
+  "result_payload": {
+    "task_id": "ec8d4b3e-8f67-4ae4-9fde-c3e69c06285f",
+    "worker_id": "worker-1",
+    "status": "success",
+    "prediction": "хорошо",
+    "value": 12.0,
+    "threshold": 10.0
+  }
+}
+~~~
+
 
 ### Получить историю задач
 
@@ -255,12 +297,13 @@ curl http://localhost/history/predictions \
 
 Вручную проверено:
 
-- создание задач через `POST /predict`
-- появление сообщений в RabbitMQ
+- отказ в создании задачи при недостатке средств (`insufficient_funds`) до RabbitMQ
+- списание стоимости модели при создании задачи
 - обработка задач двумя воркерами
 - распределение задач между `worker-1` и `worker-2`
 - сохранение результата обработки в PostgreSQL
 - получение результата через `GET /predict/{task_id}`
+- автоматический возврат средств при ошибке обработки
 - запрет на просмотр чужой задачи (`403 Forbidden`)
 
 ---

@@ -7,7 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from src.config import settings
-from src.domain_logic import predict_demo_model, validate_task_features
+from src.domain_logic import run_model_prediction, validate_task_features
 from src.models import (
     BalanceTransaction,
     MLModel,
@@ -136,7 +136,11 @@ def get_prediction_by_task_id(session: Session, task_id: str) -> PredictionReque
     stmt = (
         select(PredictionRequest)
         .where(PredictionRequest.task_id == task_id)
-        .options(selectinload(PredictionRequest.ml_model))
+        .options(
+            selectinload(PredictionRequest.ml_model),
+            selectinload(PredictionRequest.user).selectinload(User.balance),
+            selectinload(PredictionRequest.transactions),
+        )
     )
     item = session.execute(stmt).scalar_one_or_none()
 
@@ -144,6 +148,40 @@ def get_prediction_by_task_id(session: Session, task_id: str) -> PredictionReque
         raise NotFoundError(f"Задача {task_id} не найдена")
 
     return item
+
+
+def build_error_result(
+    task_id: str,
+    worker_id: str | None,
+    errors: list[dict[str, str]],
+) -> dict:
+    return {
+        "task_id": task_id,
+        "worker_id": worker_id,
+        "status": "error",
+        "errors": errors,
+    }
+
+
+def add_request_refund(
+    session: Session,
+    request: PredictionRequest,
+    description: str,
+) -> None:
+    if request.charged_amount <= 0:
+        return
+
+    request.user.balance.amount += request.charged_amount
+
+    refund_tx = BalanceTransaction(
+        user_id=request.user_id,
+        amount=request.charged_amount,
+        transaction_type=TransactionType.DEPOSIT,
+        description=description,
+        ml_request_id=request.id,
+    )
+    session.add(refund_tx)
+
 
 
 def create_user(
@@ -405,6 +443,14 @@ def create_prediction_task(
     if not model.is_active:
         raise ValidationError("Модель сейчас неактивна")
 
+    if not features:
+        raise ValidationError("features не должен быть пустым")
+
+    charged_amount = model.price if model.price > 0 else Decimal("0.00")
+
+    if charged_amount > 0 and user.balance.amount < charged_amount:
+        raise InsufficientFundsError("На балансе недостаточно средств")
+
     task_message = build_task_message(features=features, model_name=model.name)
 
     try:
@@ -418,12 +464,26 @@ def create_prediction_task(
             total_rows=1,
             valid_rows=0,
             invalid_rows=0,
-            charged_amount=Decimal("0.00"),
+            charged_amount=charged_amount,
             worker_id=None,
         )
         session.add(request)
+        session.flush()
+
+        if charged_amount > 0:
+            user.balance.amount -= charged_amount
+            charge_tx = BalanceTransaction(
+                user_id=user.id,
+                amount=charged_amount,
+                transaction_type=TransactionType.CHARGE,
+                description=f"charge for prediction task {request.task_id}",
+                ml_request_id=request.id,
+            )
+            session.add(charge_tx)
+
         session.commit()
         session.refresh(request)
+
     except Exception:
         session.rollback()
         raise
@@ -432,19 +492,26 @@ def create_prediction_task(
         publish_task_message(task_message)
     except Exception as exc:
         try:
+            request = get_prediction_by_task_id(session, task_message["task_id"])
             request.status = TaskStatus.ERROR
-            request.result_payload = {
-                "task_id": request.task_id,
-                "worker_id": None,
-                "status": "error",
-                "errors": [
+            request.result_payload = build_error_result(
+                task_id=request.task_id,
+                worker_id=None,
+                errors=[
                     {
                         "field_name": "rabbitmq",
                         "text": str(exc),
                     }
                 ],
-            }
+            )
             request.finished_at = utc_now()
+
+            add_request_refund(
+                session=session,
+                request=request,
+                description=f"refund for failed queue publish {request.task_id}",
+            )
+
             session.add(request)
             session.commit()
         except Exception:
@@ -462,7 +529,7 @@ def process_prediction_task(
 ) -> PredictionRequest:
     request = get_prediction_by_task_id(session, task_id)
 
-    if request.status == TaskStatus.DONE:
+    if request.status in {TaskStatus.DONE, TaskStatus.ERROR}:
         return request
 
     try:
@@ -486,30 +553,41 @@ def process_prediction_task(
                 }
             )
 
+        prediction_payload = None
+        if not errors:
+            prediction_payload, model_errors = run_model_prediction(
+                model_name=request.ml_model.name,
+                features=normalized_features,
+            )
+            errors.extend(model_errors)
+
         if errors:
             request.status = TaskStatus.ERROR
             request.total_rows = 1
             request.valid_rows = 0
             request.invalid_rows = len(errors)
-            request.result_payload = {
-                "task_id": request.task_id,
-                "worker_id": worker_id,
-                "status": "error",
-                "errors": errors,
-            }
+            request.result_payload = build_error_result(
+                task_id=request.task_id,
+                worker_id=worker_id,
+                errors=errors,
+            )
             request.finished_at = utc_now()
-        else:
-            prediction = predict_demo_model(normalized_features)
 
+            add_request_refund(
+                session=session,
+                request=request,
+                description=f"refund for failed task {request.task_id}",
+            )
+        else:
             request.status = TaskStatus.DONE
             request.total_rows = 1
             request.valid_rows = 1
             request.invalid_rows = 0
             request.result_payload = {
                 "task_id": request.task_id,
-                "prediction": prediction,
                 "worker_id": worker_id,
                 "status": "success",
+                **prediction_payload,
             }
             request.finished_at = utc_now()
 
@@ -522,25 +600,33 @@ def process_prediction_task(
         session.rollback()
 
         request = get_prediction_by_task_id(session, task_id)
-        request.status = TaskStatus.ERROR
-        request.worker_id = worker_id
-        request.total_rows = 1
-        request.valid_rows = 0
-        request.invalid_rows = 1
-        request.result_payload = {
-            "task_id": task_id,
-            "worker_id": worker_id,
-            "status": "error",
-            "errors": [
-                {
-                    "field_name": "internal",
-                    "text": str(exc),
-                }
-            ],
-        }
-        request.finished_at = utc_now()
 
-        session.add(request)
-        session.commit()
-        session.refresh(request)
+        if request.status != TaskStatus.ERROR:
+            request.status = TaskStatus.ERROR
+            request.worker_id = worker_id
+            request.total_rows = 1
+            request.valid_rows = 0
+            request.invalid_rows = 1
+            request.result_payload = build_error_result(
+                task_id=task_id,
+                worker_id=worker_id,
+                errors=[
+                    {
+                        "field_name": "internal",
+                        "text": str(exc),
+                    }
+                ],
+            )
+            request.finished_at = utc_now()
+
+            add_request_refund(
+                session=session,
+                request=request,
+                description=f"refund for crashed task {request.task_id}",
+            )
+
+            session.add(request)
+            session.commit()
+            session.refresh(request)
+
         return request
