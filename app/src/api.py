@@ -79,15 +79,27 @@ async def service_error_handler(_: Request, exc: ServiceError):
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_handler(_: Request, exc: RequestValidationError):
+    normalized_errors = []
+
+    for item in exc.errors():
+        normalized_item = dict(item)
+
+        ctx = normalized_item.get("ctx")
+        if isinstance(ctx, dict):
+            normalized_item["ctx"] = {
+                key: str(value) for key, value in ctx.items()
+            }
+
+        normalized_errors.append(normalized_item)
+
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content=error_payload(
             "request_validation_error",
             "Ошибка валидации входных данных",
-            exc.errors(),
+            normalized_errors,
         ),
     )
-
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_: Request, exc: HTTPException):
