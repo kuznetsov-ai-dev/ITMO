@@ -33,7 +33,7 @@ def validate_task_features(
             )
             continue
 
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if not isinstance(value, (int, float)):
             errors.append(
                 {
                     "field_name": key,
@@ -47,55 +47,5 @@ def validate_task_features(
     return normalized_features, errors
 
 
-def _validate_value_feature(
-    model_name: str,
-    features: dict[str, float],
-) -> list[dict[str, str]]:
-    if "value" not in features:
-        return [
-            {
-                "field_name": "value",
-                "text": f"для модели {model_name} обязателен признак value",
-            }
-        ]
-    return []
-
-
-def predict_simple_quality_model(features: dict[str, float]) -> dict[str, Any]:
-    value = round(features["value"], 2)
-    return {
-        "prediction": "хорошо" if value >= 10 else "плохо",
-        "value": value,
-        "threshold": 10.0,
-    }
-
-
-def predict_simple_fast_model(features: dict[str, float]) -> dict[str, Any]:
-    value = round(features["value"], 2)
-    return {
-        "prediction": "хорошо" if value >= 5 else "плохо",
-        "value": value,
-        "threshold": 5.0,
-    }
-
-
-def run_model_prediction(
-    model_name: str,
-    features: dict[str, float],
-) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
-    errors = _validate_value_feature(model_name=model_name, features=features)
-    if errors:
-        return None, errors
-
-    if model_name == "simple-quality-model":
-        return predict_simple_quality_model(features), []
-
-    if model_name == "simple-fast-model":
-        return predict_simple_fast_model(features), []
-
-    return None, [
-        {
-            "field_name": "model",
-            "text": f"для модели {model_name} не реализована логика предикта",
-        }
-    ]
+def predict_demo_model(features: dict[str, float]) -> float:
+    return round(sum(features.values()), 2)

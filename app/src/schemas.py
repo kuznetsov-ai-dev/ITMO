@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
 LOGIN_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]+$")
@@ -69,6 +69,12 @@ class LoginResponse(BaseModel):
     user: UserResponse
 
 
+class WebTokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+    user: UserResponse
+
+
 class BalanceResponse(BaseModel):
     balance: str
 
@@ -85,6 +91,7 @@ class TransactionResponse(BaseModel):
     transaction_type: str
     description: str | None = None
     ml_request_id: int | None = None
+    task_id: str | None = None
     created_at: datetime
 
 
@@ -102,9 +109,23 @@ class MLModelResponse(BaseModel):
     created_at: datetime
 
 
+class PredictRowIn(BaseModel):
+    row_id: str | None = Field(default=None, max_length=100)
+    features: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("row_id")
+    @classmethod
+    def normalize_row_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
 class PredictTaskIn(BaseModel):
     model: str = Field(min_length=1, max_length=150)
-    features: dict[str, float] = Field(min_length=1)
+    features: dict[str, Any] | None = None
+    rows: list[PredictRowIn] | None = None
 
     @field_validator("model")
     @classmethod
@@ -114,17 +135,21 @@ class PredictTaskIn(BaseModel):
             raise ValueError("Имя модели не может быть пустым")
         return normalized
 
-    @field_validator("features")
-    @classmethod
-    def validate_features_not_empty(cls, value: dict[str, float]) -> dict[str, float]:
-        if not value:
-            raise ValueError("features не должен быть пустым")
-        return value
+    @model_validator(mode="after")
+    def validate_input_payload(self):
+        if self.features is not None and self.rows:
+            raise ValueError("Передайте либо features, либо rows")
+
+        if self.features is None and not self.rows:
+            raise ValueError("Нужно передать либо features, либо rows")
+
+        return self
 
 
 class PredictTaskAcceptedResponse(BaseModel):
     task_id: str
     status: str
+    total_rows: int
 
 
 class PredictionResponse(BaseModel):
@@ -141,4 +166,5 @@ class PredictionResponse(BaseModel):
     invalid_rows: int
     created_at: datetime
     finished_at: datetime | None = None
+    input_payload: dict[str, Any]
     result_payload: dict[str, Any] | None = None

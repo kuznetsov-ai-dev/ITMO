@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Главная{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <h1>Личный кабинет ML-сервиса</h1>
+    <p>
+        Web-интерфейс работает поверх существующего backend-ядра и позволяет:
+        регистрироваться, пополнять баланс, отправлять ML-запросы, смотреть историю
+        и результаты предсказаний.
+    </p>
+
+    <div class="hero-actions">
+        {% if current_user %}
+            <a class="btn" href="/cabinet">Перейти в кабинет</a>
+            <a class="btn btn-secondary" href="/cabinet/predict">Сделать ML-запрос</a>
+        {% else %}
+            <a class="btn" href="/login">Войти</a>
+            <a class="btn btn-secondary" href="/register">Зарегистрироваться</a>
+        {% endif %}
+    </div>
+</section>
+
+<section class="grid-two">
+    <div class="card">
+        <h2>Что умеет сервис</h2>
+        <ul>
+            <li>Авторизация и личный кабинет</li>
+            <li>Отображение и пополнение баланса</li>
+            <li>ML-запросы через форму, JSON и CSV-файл</li>
+            <li>Частичная валидация данных</li>
+            <li>История операций и предсказаний</li>
+            <li>REST API для тех же сценариев</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>Доступные модели</h2>
+        {% if models %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Модель</th>
+                        <th>Описание</th>
+                        <th>Цена</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for model in models %}
+                        <tr>
+                            <td>{{ model.name }}</td>
+                            <td>{{ model.description }}</td>
+                            <td>{{ model.price }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>Нет активных моделей.</p>
+        {% endif %}
+    </div>
+</section>
+
+<section class="card">
+    <h2>Демо-доступ</h2>
+    <p><strong>Пользователь:</strong> demo_user / user123</p>
+    <p><strong>Администратор:</strong> demo_admin / admin123</p>
+</section>
+{% endblock %}

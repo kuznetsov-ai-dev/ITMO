@@ -4,15 +4,18 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.config import settings
 from src.init_data import init_database
+from src.routers.admin import router as admin_router
 from src.routers.auth import router as auth_router
 from src.routers.balance import router as balance_router
 from src.routers.history import router as history_router
 from src.routers.predict import router as predict_router
 from src.routers.system import router as system_router
 from src.routers.users import router as users_router
+from src.routers.web import router as web_router
 from src.services import (
     ConflictError,
     InsufficientFundsError,
@@ -55,11 +58,11 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    version="4.1.0",
+    version="6.0.0",
     description=(
-        "REST API для ML-сервиса. "
-        "Защищённые эндпоинты используют HTTP Basic Auth. "
-        "Авторизация возможна по логину или email."
+        "REST API и Web-интерфейс для ML-сервиса. "
+        "REST использует HTTP Basic Auth. "
+        "Web-интерфейс использует cookie/JWT."
     ),
     lifespan=lifespan,
 )
@@ -117,9 +120,13 @@ async def unexpected_exception_handler(_: Request, exc: Exception):
     )
 
 
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 app.include_router(system_router)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(balance_router)
 app.include_router(predict_router)
 app.include_router(history_router)
+app.include_router(admin_router)
+app.include_router(web_router)

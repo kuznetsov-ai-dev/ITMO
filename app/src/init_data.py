@@ -150,9 +150,9 @@ def seed_demo_data(session: Session) -> None:
     ensure_model(
         session=session,
         name="demo_model",
-        description="Старая демонстрационная модель отключена и не используется",
-        price=Decimal("0.00"),
-        is_active=False,
+        description="Простая demo-модель для асинхронных задач через RabbitMQ",
+        price=Decimal("10.00"),
+        is_active=True,
     )
 
 

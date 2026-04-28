@@ -18,13 +18,13 @@ def check_service(host: str, port: int) -> bool:
         return False
 
 
-@router.get("/")
-def home():
+@router.get("/api/info")
+def api_info():
     return {
         "message": "Приложение работает",
         "app_name": settings.app_name,
         "docs": "/docs",
-        "auth": "HTTP Basic Auth",
+        "auth": "HTTP Basic Auth + cookie auth for web",
     }
 
 

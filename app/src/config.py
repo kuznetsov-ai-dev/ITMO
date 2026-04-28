@@ -28,6 +28,13 @@ class Settings:
     rabbitmq_password: str = os.getenv("RABBITMQ_PASSWORD", "itmo_rabbit_pass")
     rabbitmq_queue: str = os.getenv("RABBITMQ_QUEUE", "ml_task_queue")
 
+    cookie_name: str = os.getenv("COOKIE_NAME", "ITMO_AUTH")
+    secret_key: str = os.getenv("SECRET_KEY", "CHANGE_ME_SUPER_SECRET")
+    access_token_expire_minutes: int = int(
+        os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480")
+    )
+    jwt_algorithm: str = "HS256"
+
     @property
     def database_url(self) -> str:
         explicit_url = os.getenv("DATABASE_URL")

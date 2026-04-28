@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}История{% endblock %}
+
+{% block content %}
+<h1>История операций и предсказаний</h1>
+
+<div class="card">
+    <h2>История ML-запросов</h2>
+
+    {% if predictions %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Дата</th>
+                    <th>task_id</th>
+                    <th>Модель</th>
+                    <th>Статус</th>
+                    <th>Строк всего</th>
+                    <th>Корректно</th>
+                    <th>Ошибок</th>
+                    <th>Списано</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in predictions %}
+                    <tr>
+                        <td>{{ item.created_at }}</td>
+                        <td>{{ item.task_id }}</td>
+                        <td>{{ item.ml_model.name if item.ml_model else '-' }}</td>
+                        <td>
+                            {% if item.status.value == "new" %}
+                                new — задача создана
+                            {% elif item.status.value == "work" %}
+                                work — задача обрабатывается
+                            {% elif item.status.value == "done" %}
+                                done — выполнено
+                            {% elif item.status.value == "error" %}
+                                error — ошибка
+                            {% else %}
+                                {{ item.status.value }}
+                            {% endif %}
+                        </td>
+                        <td>{{ item.total_rows }}</td>
+                        <td>{{ item.valid_rows }}</td>
+                        <td>{{ item.invalid_rows }}</td>
+                        <td>{{ item.charged_amount }}</td>
+                    </tr>
+                    <tr>
+                        <td colspan="8">
+                            <strong>Входные данные:</strong>
+                            <pre>{{ item.input_payload }}</pre>
+
+                            <strong>Результат:</strong>
+                            {% if item.result_payload %}
+                                <pre>{{ item.result_payload }}</pre>
+                            {% elif item.status.value in ["new", "work"] %}
+                                <pre>Задача ещё обрабатывается. Обновите страницу через пару секунд.</pre>
+                            {% else %}
+                                <pre>Результат отсутствует</pre>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>История ML-запросов пуста.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>История транзакций</h2>
+
+    {% if transactions %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Дата и время</th>
+                    <th>Тип операции</th>
+                    <th>Сумма</th>
+                    <th>Описание</th>
+                    <th>Связанный task_id</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in transactions %}
+                    <tr>
+                        <td>{{ item.created_at }}</td>
+                        <td>{{ item.transaction_type.value }}</td>
+                        <td>{{ item.amount }}</td>
+                        <td>{{ item.description or '-' }}</td>
+                        <td>{{ item.ml_request.task_id if item.ml_request else '-' }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>История транзакций пуста.</p>
+    {% endif %}
+</div>
+{% endblock %}
