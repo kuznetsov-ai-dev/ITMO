@@ -1,120 +1,106 @@
-# Задание 4. REST API для ML-сервиса (FastAPI)
+# Задание 5. Взаимодействие с ML-сервисом через RabbitMQ
 
 ## Описание
 
-В этом задании поверх бизнес-логики и ORM из задания 3 реализован полноценный REST API на FastAPI.
+В проекте реализовано асинхронное взаимодействие с ML-сервисом через RabbitMQ.
 
-API предоставляет внешний интерфейс для работы с системой:
+Система построена по схеме:
 
-- регистрация пользователя
-- авторизация пользователя
-- получение данных текущего пользователя
-- просмотр и пополнение баланса
-- запуск ML-предсказания
-- просмотр истории транзакций
-- просмотр истории запросов на предсказание
+- один publisher — FastAPI приложение
+- один broker — RabbitMQ
+- одна очередь `ml_task_queue`
+- два consumers — `worker-1` и `worker-2`
 
-Решение построено поверх уже существующего сервисного слоя. Бизнес-логика не дублируется в контроллерах.
+FastAPI принимает входящий запрос, формирует ML-задачу, сохраняет её в PostgreSQL и отправляет сообщение в очередь RabbitMQ.
+
+Воркеры получают задачи из очереди, валидируют входные данные, выполняют учебный ML-predict и сохраняют результат обработки в базе данных.
 
 ---
 
+## Реализованные компоненты
 
-### 1. FastAPI REST API
+### 1. Publisher
 
-Добавлено приложение FastAPI с логическими группами эндпоинтов:
+Publisher реализован внутри FastAPI приложения.
 
-- `/auth`
-- `/users`
-- `/balance`
-- `/predict`
-- `/history`
+Доступные endpoint'ы:
 
-### 2. Аутентификация и авторизация
+- `POST /predict` — создать ML-задачу и отправить её в RabbitMQ
+- `GET /predict/{task_id}` — получить статус и результат задачи
+- `GET /models` — получить список доступных моделей
 
-Использована базовая аутентификация `HTTP Basic Auth`.
 
-Реализованы:
+При создании задачи система до отправки в RabbitMQ проверяет баланс пользователя.
+Если средств недостаточно, запрос сразу завершается ошибкой и задача не отправляется в очередь.
 
-- регистрация нового пользователя с уникальными login и email
-- авторизация по login или email
-- защищённые эндпоинты для работы от имени текущего пользователя
+Если средств достаточно, стоимость модели списывается сразу и создаётся транзакция типа `charge`.
+Если обработка задачи завершится ошибкой, пользователю автоматически создаётся возврат средств через транзакцию типа `deposit`.
 
-### 3. Работа с балансом
+### 2. RabbitMQ
 
-Реализованы эндпоинты для:
+RabbitMQ развёрнут через Docker Compose.
 
-- просмотра текущего баланса;
-- пополнения баланса;
-- возврата обновлённого баланса после операции.
+Используется:
 
-### 4. ML-предсказания
+- один broker
+- одна очередь `ml_task_queue`
+- стандартный exchange (`exchange=""`)
+- режим один publisher — несколько consumers
 
-Пользователь может:
+### 3. ML-воркеры
 
-- получить список доступных моделей
-- отправить данные на предсказание
-- получить результат предсказания
-- получить ошибку при невалидных данных
-- получить ошибку при недостаточном балансе
+Подняты два воркера:
 
-При успешном запуске:
+- `worker-1`
+- `worker-2`
 
-- стоимость модели списывается с баланса
-- операция сохраняется в истории транзакций
-- сам запрос сохраняется в истории предсказаний
+Оба воркера подписаны на одну очередь и получают сообщения по схеме round-robin.
 
-### 5. История операций
+Каждый воркер:
 
-Добавлены эндпоинты для просмотра:
+- получает сообщение из очереди
+- извлекает `task_id`
+- валидирует `features`
+- выполняет учебный ML-predict
+- записывает результат в PostgreSQL
+- сохраняет `worker_id` и статус обработки
 
-- истории транзакций пользователя
-- истории ML-запросов пользователя
+---
 
-### 6. Валидация и ошибки
+## Формат сообщения
 
-Реализованы:
-
-- валидация входных данных через Pydantic
-- корректные HTTP-коды
-- единый формат ошибок в JSON
-- обработчики бизнес-ошибок и ошибок валидации
-
-Пример формата ошибки:
-
-~~~
+~~~json
 {
-  "error": {
-    "code": "validation_error",
-    "message": "Сумма пополнения должна быть больше нуля",
-    "details": null
-  }
+  "task_id": "uuid",
+  "features": {
+    "value": 12
+  },
+  "model": "simple-quality-model",
+  "timestamp": "2026-01-01T12:00:00"
 }
 ~~~
 
-### 7. Тестирование API
+---
 
-Добавлены API-тесты на основные сценарии:
+## Формат результата обработки
 
-- регистрация и логин
-- просмотр и пополнение баланса
-- запуск предикта
-- просмотр истории
-- ошибка без авторизации
-- ошибка при недостатке средств
+~~~json
+{
+  "task_id": "uuid",
+  "worker_id": "worker-1",
+  "status": "success",
+  "prediction": "хорошо",
+  "value": 12.0,
+  "threshold": 10.0
+}
+~~~
 
-### Структура
+---
 
-ITMO/
-├── app/
-│   ├── src/
-│   │   ├── __init__.py
-│   │   ├── api.py
-│   │   ├── config.py
-│   │   ├── db.py
-│   │   ├── dependencies.py
-│   │   ├── domain_logic.py
-│   │   ├── init_data.py
-│   │   ├── models.py
+## Структура проекта
+
+├── app
+│   ├── src
 │   │   ├── routers
 │   │   │   ├── __init__.py
 │   │   │   ├── auth.py
@@ -123,56 +109,97 @@ ITMO/
 │   │   │   ├── predict.py
 │   │   │   ├── system.py
 │   │   │   └── users.py
+│   │   ├── __init__.py
+│   │   ├── api.py
+│   │   ├── config.py
+│   │   ├── db.py
+│   │   ├── dependencies.py
+│   │   ├── domain_logic.py
+│   │   ├── init_data.py
+│   │   ├── models.py
 │   │   ├── schemas.py
 │   │   ├── security.py
 │   │   ├── serializers.py
-│   │   └── services.py
-│   ├── tests/
+│   │   ├── services.py
+│   │   └── worker.py
+│   ├── tests
 │   │   └── test_task4_api.py
 │   ├── .env
+│   ├── .env example
 │   ├── Dockerfile
 │   ├── main.py
 │   └── requirements.txt
-├── task_1/
-├── web-proxy/
+├── web-proxy
+│   └── nginx.conf
+├── .gitignore
+├── 1.py
 ├── docker-compose.yml
-└── README.md
+├── README.md
+└── repo_dump.txt
 
-
+---
 
 ## Запуск проекта
 
+Сначала удалить volume:
+
+~~~bash
+docker compose down -v
 ~~~
+
+Далее запустить проект:
+
+~~~bash
 docker compose up --build
 ~~~
 
-## Запуск тестов
+---
 
-~~~
-docker compose exec app python -m pytest -q tests
-~~~
+## Проверка сервисов
 
-## Swagger UI
+### Swagger
 
-Документация FastAPI доступна по адресу:
-
-~~~
+~~~text
 http://localhost/docs
 ~~~
 
-Для защищённых эндпоинтов нужно использовать HTTP Basic Auth.
+### RabbitMQ Management UI
 
-Можно войти под демо-пользователем, который создаётся при старте приложения:
+~~~text
+http://localhost:15672
+~~~
 
-- login: `demo_user`
-- email: `demo.user@mail.com`
-- password: `user123`
+
+---
+
+## Учебная модель
+
+Для демонстрации используется модель:
+
+- `simple-quality-model`
+
+Логика модели:
+
+- обязателен числовой признак `value`
+- если `value >= 10`, модель возвращает `prediction = "хорошо"`
+- если `value < 10`, модель возвращает `prediction = "плохо"`
+
+Пример:
+
+- `value = 12`
+
+Результат:
+
+- `prediction = "хорошо"`
+- `threshold = 10.0`
+
+---
 
 ## Примеры запросов
 
 ### Регистрация пользователя
 
-~~~
+~~~bash
 curl -X POST http://localhost/auth/register \
   -H "Content-Type: application/json" \
   -d '{
@@ -182,65 +209,123 @@ curl -X POST http://localhost/auth/register \
   }'
 ~~~
 
-### Проверка логина
+### Авторизация
 
-~~~
+~~~bash
 curl -X POST http://localhost/auth/login \
   -u new_user:123456
 ~~~
 
-### Получить профиль текущего пользователя
-
-~~~
-curl http://localhost/users/me \
-  -u new_user@mail.com:123456
-~~~
-
-### Пополнить баланс
-
-~~~
-curl -X POST http://localhost/balance/deposit \
-  -u new_user@mail.com:123456 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "amount": "100.00",
-    "description": "manual top up"
-  }'
-~~~
-
 ### Получить список моделей
 
-~~~
+~~~bash
 curl http://localhost/models \
-  -u new_user@mail.com:123456
+  -u new_user:123456
 ~~~
 
-### Запустить предсказание
+### Создать ML-задачу
 
-~~~
+~~~bash
 curl -X POST http://localhost/predict \
-  -u new_user@mail.com:123456 \
+  -u new_user:123456 \
   -H "Content-Type: application/json" \
   -d '{
-    "model_id": 1,
-    "rows": [
-      {"value": 5},
-      {"value": 12},
-      {"name": "bad row"}
-    ]
+    "model": "simple-quality-model",
+    "features": {
+      "value": 12
+    }
   }'
 ~~~
 
-### История транзакций
+Пример ответа:
 
-~~~
-curl http://localhost/history/transactions \
-  -u new_user@mail.com:123456
+~~~json
+{
+  "task_id": "ec8d4b3e-8f67-4ae4-9fde-c3e69c06285f",
+  "status": "new"
+}
 ~~~
 
-### История предсказаний
+После создания задачи стоимость модели списывается сразу.
+Для `simple-quality-model` при начальном балансе `100.00` баланс пользователя станет `75.00`.
 
+### Проверить статус задачи
+
+~~~bash
+curl http://localhost/predict/ec8d4b3e-8f67-4ae4-9fde-c3e69c06285f \
+  -u new_user:123456
 ~~~
+
+
+Пример успешного результата:
+
+~~~json
+{
+  "id": 1,
+  "task_id": "ec8d4b3e-8f67-4ae4-9fde-c3e69c06285f",
+  "user_id": 4,
+  "model_id": 1,
+  "model_name": "simple-quality-model",
+  "status": "done",
+  "worker_id": "worker-1",
+  "charged_amount": "25.00",
+  "total_rows": 1,
+  "valid_rows": 1,
+  "invalid_rows": 0,
+  "result_payload": {
+    "task_id": "ec8d4b3e-8f67-4ae4-9fde-c3e69c06285f",
+    "worker_id": "worker-1",
+    "status": "success",
+    "prediction": "хорошо",
+    "value": 12.0,
+    "threshold": 10.0
+  }
+}
+~~~
+
+
+### Получить историю задач
+
+~~~bash
 curl http://localhost/history/predictions \
-  -u new_user@mail.com:123456
+  -u new_user:123456
 ~~~
+
+---
+
+## Ручное тестирование
+
+Вручную проверено:
+
+- отказ в создании задачи при недостатке средств (`insufficient_funds`) до RabbitMQ
+- списание стоимости модели при создании задачи
+- обработка задач двумя воркерами
+- распределение задач между `worker-1` и `worker-2`
+- сохранение результата обработки в PostgreSQL
+- получение результата через `GET /predict/{task_id}`
+- автоматический возврат средств при ошибке обработки
+- запрет на просмотр чужой задачи (`403 Forbidden`)
+
+---
+
+## Логи воркеров
+
+Для проверки распределения задач между воркерами можно использовать:
+
+~~~bash
+docker compose logs -f worker-1
+~~~
+
+~~~bash
+docker compose logs -f worker-2
+~~~
+
+---
+
+## Запуск тестов
+
+~~~bash
+docker compose exec app python -m pytest -q tests
+~~~
+
+---

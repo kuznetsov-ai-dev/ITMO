@@ -40,10 +40,12 @@ def serialize_transaction(tx: BalanceTransaction) -> dict:
 def serialize_prediction(item: PredictionRequest) -> dict:
     return {
         "id": item.id,
+        "task_id": item.task_id,
         "user_id": item.user_id,
         "model_id": item.model_id,
         "model_name": item.ml_model.name if item.ml_model else None,
         "status": item.status.value,
+        "worker_id": item.worker_id,
         "charged_amount": str(item.charged_amount),
         "total_rows": item.total_rows,
         "valid_rows": item.valid_rows,
