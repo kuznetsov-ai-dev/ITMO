@@ -58,11 +58,12 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    version="6.0.0",
+    version="8.0.0",
     description=(
-        "REST API и Web-интерфейс для ML-сервиса. "
-        "REST использует HTTP Basic Auth. "
-        "Web-интерфейс использует cookie/JWT."
+        "Финальный проект ITMO: REST API и Web-интерфейс для ML-сервиса. "
+        "Проект поддерживает регистрацию, авторизацию, баланс пользователя, "
+        "создание ML-задач, асинхронную обработку через RabbitMQ "
+        "и просмотр истории запросов."
     ),
     lifespan=lifespan,
 )
